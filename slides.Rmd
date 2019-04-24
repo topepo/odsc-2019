@@ -1,0 +1,1478 @@
+---
+title: "Modeling in the Tidyverse"
+author: Max Kuhn (RStudio)
+output:
+  xaringan::moon_reader:
+    css: ["mtheme_max.css", "fonts_mtheme_max.css"]    
+    self_contained: false
+    lib_dir: libs
+    nature:
+      ratio: '16:9'
+      highlightLanguage: R
+      countIncrementalSlides: false
+editor_options: 
+  chunk_output_type: console
+---
+
+# Workshop Overview
+
+> _Basic familiarity with R and the tidyverse is required._
+
+The *goal* is for you to be able to easily build predictive/machine learning models in R using a variety of packages and model types. 
+
+* "Models that are focused on prediction"... what does that mean?
+
+* "Machine Learning"... so this is deep learning with massive data sets, right? 
+
+The course is broken up into sections for _fitting models_ and _preprocessing data_.
+
+---
+
+# Why R for Modeling?
+
+.pull-left[
+* _R has cutting edge models_. 
+  
+  Machine learning developers in some domains use R as their primary computing environment and their work often results in R packages.
+
+
+* _It is easy to port or link to other applications_. 
+
+  R doesn't try to be everything to everyone. If you prefer models implemented in C, C++, `tensorflow`, `keras`, `python`, `stan`, or `Weka`, you can access these applications without leaving R. 
+]
+
+.pull-right[
+* _R and R packages are built by people who **do** data analysis_. 
+
+* _The S language is very mature_. 
+
+* The machine learning environment in R is extremely rich. 
+]
+
+---
+
+# Downsides to Modeling in R
+
+
+.pull-left[
+* R is a data analysis language and is not C or Java. If a high performance deployment is required, R can be treated like a prototyping language.  
+
+* R is mostly memory-bound. There are plenty of exceptions to this though. 
+]
+
+.pull-right[
+The main issue is one of _consistency of interface_. For example: 
+* There are two methods for specifying what terms are in a model<sup>1</sup>. Not all models have both. 
+* 99% of model functions automatically generate dummy variables. 
+* Sparse matrices can be used (unless they can't).
+]
+
+.footnote[[1] There are now three but the last one is brand new and will be discussed later.]
+
+
+---
+
+# Syntax for Computing Predicted Class Probabilities
+
+|Function     |Package      |Code                                       |
+|:------------|:------------|:------------------------------------------|
+|`lda`        |`MASS`       |`predict(obj)`                             |
+|`glm`        |`stats`      |`predict(obj, type = "response")`          |
+|`gbm`        |`gbm`        |`predict(obj, type = "response", n.trees)` |
+|`mda`        |`mda`        |`predict(obj, type = "posterior")`         |
+|`rpart`      |`rpart`      |`predict(obj, type = "prob")`              |
+|`Weka`       |`RWeka`      |`predict(obj, type = "probability")`       |
+|`logitboost` |`LogitBoost` |`predict(obj, type = "raw", nIter)`        |
+
+We'll see a solution for this later in the class. 
+
+
+---
+
+# `tidymodels` Collection of Packages  <img src="images/tidymodels_hex.png" class="title-hex">
+
+```{r tm}
+library(tidymodels)
+```
+
+```{r others, include = FALSE}
+library(kableExtra)
+library(ggthemes)
+```
+
+Plus [`tidypredict`](http://tidypredict.netlify.com/), [`tidyposterior`](https://tidymodels.github.io/tidyposterior/), [`tidytext`](https://github.com/juliasilge/tidytext), and more in development.
+
+```{r ggplot, include = FALSE}
+thm <- theme_bw() + 
+  theme(
+    panel.background = element_rect(fill = "transparent", colour = NA), 
+    plot.background = element_rect(fill = "transparent", colour = NA),
+    legend.position = "top",
+    legend.background = element_rect(fill = "transparent", colour = NA),
+    legend.key = element_rect(fill = "transparent", colour = NA)
+  )
+theme_set(thm)
+```
+
+---
+
+# Example Data Set - House Prices
+
+For our examples, we will use the Ames IA housing data. There are 2,930 properties in the data. 
+
+The Sale Price was recorded along with 81 predictors, including:
+
+* Location (e.g. neighborhood) and lot information.
+* House components (garage, fireplace, pool, porch, etc.).
+* General assessments such as overall quality and condition.
+* Number of bedrooms, baths, and so on. 
+
+More details can be found in [De Cock (2011, Journal of Statistics Education)](http://ww2.amstat.org/publications/jse/v19n3/decock.pdf).
+
+The raw data are at [`http://bit.ly/2whgsQM`](http://bit.ly/2whgsQM) but we will use a processed version found in the [`AmesHousing`](https://github.com/topepo/AmesHousing) package. 
+
+
+---
+
+# Example Data Set - House Prices
+
+```{r ames-map, echo = FALSE, message = FALSE, fig.align='center', dev = "svg"}
+library(AmesHousing)
+library(leaflet)
+library(htmltools)
+library(Cairo)
+ames <- make_ames()
+
+col_key <- c(
+  'NAmes',     '#0000FF',
+  'CollgCr',   '#FF0000',
+  'OldTown',   '#FFFFFF',
+  'Edwards',   '#FF00B6',
+  'Somerst',   '#FF3030',
+  'NridgHt',   '#009FFF',
+  'Gilbert',   '#DD00FF',
+  'Sawyer',    '#9A4D42',
+  'NWAmes',    '#00FFBE',
+  'SawyerW',   '#1F9698',
+  'Mitchel',   '#FFACFD',
+  'BrkSide',   '#720055',
+  'Crawfor',   '#F1085C',
+  'IDOTRR',    '#FE8F42',
+  'Timber',    '#004CFF',
+  'NoRidge',   '#ffff00',
+  'StoneBr',   '#B1CC71',
+  'SWISU',     '#02AD24',
+  'ClearCr',   '#FFD300',
+  'MeadowV',   '#886C00',
+  'BrDale',    '#FFB79F',
+  'Blmngtn',   '#858567',
+  'Veenker',   '#A10300',
+  'NPkVill',   '#00479E',
+  'Blueste',   '#DC5E93',
+  'Greens',    '#93D4FF',
+  'GreenHills', '#e5f2e5', 
+  'Landmrk',   '#C8FF00'
+) 
+col_key <- as.data.frame(matrix(col_key, byrow = TRUE, ncol = 2))
+names(col_key) <- c("Neighborhood", "color")
+col_key <- col_key %>%
+    mutate(
+      Neighborhood =
+        dplyr::recode(
+          Neighborhood,
+          "Blmngtn" = "Bloomington_Heights",
+          "Bluestem" = "Bluestem",
+          "BrDale" = "Briardale",
+          "BrkSide" = "Brookside",
+          "ClearCr" = "Clear_Creek",
+          "CollgCr" = "College_Creek",
+          "Crawfor" = "Crawford",
+          "Edwards" = "Edwards",
+          "Gilbert" = "Gilbert",
+          "Greens" = "Greens",
+          "GreenHills" = "Green_Hills",
+          "IDOTRR" = "Iowa_DOT_and_Rail_Road",
+          "Landmrk" = "Landmark",
+          "MeadowV" = "Meadow_Village",
+          "Mitchel" = "Mitchell",
+          "NAmes" = "North_Ames",
+          "NoRidge" = "Northridge",
+          "NPkVill" = "Northpark_Villa",
+          "NridgHt" = "Northridge_Heights",
+          "NWAmes" = "Northwest_Ames",
+          "OldTown" = "Old_Town",
+          "SWISU" = "South_and_West_of_Iowa_State_University",
+          "Sawyer" = "Sawyer",
+          "SawyerW" = "Sawyer_West",
+          "Somerst" = "Somerset",
+          "StoneBr" = "Stone_Brook",
+          "Timber" = "Timberland",
+          "Veenker" = "Veenker"
+        ))
+
+lon_rnd <- range(ames$Longitude)
+lat_rnd <- range(ames$Latitude)
+
+ia_map <- leaflet(width = "100%") %>%
+  addProviderTiles(providers$Stamen.Toner)
+
+for(i in 1:nrow(col_key)) {
+  ia_map <- ia_map %>%
+    addCircles(
+      data = subset(ames, Neighborhood == col_key$Neighborhood[i]),
+      lng = ~Longitude, lat = ~Latitude,
+      color = col_key$color[i],
+      fill = TRUE,
+      fillColor = col_key$color[i],
+      radius = 6,
+      popup = htmlEscape(col_key$Neighborhood[i]),
+      opacity = .25)
+}
+ia_map
+```
+
+
+---
+
+# Tidyverse Syntax <img src="images/dplyr.png" class="title-hex">
+
+Many tidyverse functions have syntax unlike base R code. For example:
+
+* Vectors of variable names are eschewed in favor of _functional programming_. For example: 
+
+```{r func-ex, eval = FALSE}
+contains("Sepal")
+
+# instead of 
+
+c("Sepal.Width", "Sepal.Length")
+```
+
+* The _pipe_ operator is preferred. For example:
+
+```{r pipe-ex, eval = FALSE}
+merged <- inner_join(a, b)
+
+# is equal to
+
+merged <- a %>%
+  inner_join(b) 
+```
+
+* Functions are more _modular_ than their traditional analogs (`dplyr`'s `filter()` and `select()` vs `base::subset()`)
+
+---
+
+# Some Example Data Manipulation Code <img src="images/dplyr.png" class="title-hex"><img src="images/readr.png" class="title-hex">
+
+```{r tidy-example, message = FALSE, warning = FALSE}
+library(tidyverse)
+
+ames_prices <- "http://bit.ly/2whgsQM" %>%
+  read_delim(delim = "\t", guess_max = 2000) %>%
+  rename_at(vars(contains(' ')), list(~gsub(' ', '_', .))) %>%
+  dplyr::rename(Sale_Price = SalePrice) %>%
+  dplyr::filter(!is.na(Electrical)) %>%
+  dplyr::select(-Order, -PID, -Garage_Yr_Blt)
+
+ames_prices %>%
+  group_by(Alley) %>%
+  summarize(
+    mean_price = mean(Sale_Price / 1000),
+    n = sum(!is.na(Sale_Price))
+  )
+```
+
+
+---
+
+# Examples of `purrr::map*` <img src="images/dplyr.png" class="title-hex"><img src="images/purrr.png" class="title-hex">
+
+purrr contains functions that _iterate over lists_ without the explicit use of loops. They are similar to the family of apply functions in base R, but are type stable.
+
+
+
+.pull-left[
+
+```{r purrr-example-lhs}
+# purrr loaded with tidyverse or tidymodels package
+
+mini_ames <- ames_prices %>%
+  dplyr::select(Alley, Sale_Price, Yr_Sold) %>%
+  dplyr::filter(!is.na(Alley))
+
+head(mini_ames, n = 5)
+```
+
+]
+
+.pull-right[
+```{r purrr-split-map}
+by_alley <- split(mini_ames, mini_ames$Alley)
+# map(.x, .f, ...)
+map(by_alley, head, n = 2)
+```
+
+]
+
+---
+
+# Examples of `purrr::map*` <img src="images/dplyr.png" class="title-hex"><img src="images/purrr.png" class="title-hex">
+
+.pull-left[
+```{r purrr-map-nrow}
+map(by_alley, nrow)
+```
+
+`map()` always returns a list. Use suffixed versions for simplification of the result.
+
+```{r purrr-map-int}
+map_int(by_alley, nrow)
+```
+
+]
+
+.pull-right[
+
+Complex operations can be specified using a _formula notation_. Access the current
+thing you are iterating over with `.x`.
+
+```{r purrr-map-summarise}
+map(
+  by_alley, 
+  ~summarise(.x, max_price = max(Sale_Price))
+)
+```
+
+]
+
+---
+
+# `purrr` and list-columns <img src="images/dplyr.png" class="title-hex"><img src="images/purrr.png" class="title-hex"><img src="images/tidyr.png" class="title-hex">
+
+Rather than using `split()`, we can `tidyr::nest()` by `Alley` to get a data frame with
+a _list-column_. We often use these when working with _multiple models_.
+
+.pull-left[
+
+```{r tidyr-nest}
+ames_lst_col <- nest(mini_ames, -Alley)
+ames_lst_col
+```
+
+]
+
+.pull-right[
+
+```{r list-col-mutate}
+ames_lst_col %>%
+  mutate(
+    n_row = map_int(data, nrow),
+    max   = map_dbl(data, ~max(.x$Sale_Price))
+  )
+```
+
+]
+
+---
+
+# Quick Data Investigation
+
+To get warmed up, let's load the real Ames data and do some basic investigations into the variables, such as exploratory visualizations or summary statistics. The idea is to get a feel for the data. 
+
+Let's take 10 minutes to work on your own or with someone next to you. Collaboration is highly encouraged!
+
+To get the data:
+
+```{r load-ames}
+library(AmesHousing)
+ames <- make_ames()
+```
+
+
+---
+
+# Resources
+
+* [`http://www.tidyverse.org/`](http://www.tidyverse.org/)
+* [R for Data Science](http://r4ds.had.co.nz/)
+* Jenny's  [`purrr` tutorial](https://jennybc.github.io/purrr-tutorial/) or [Happy R Users Purrr](https://www.rstudio.com/resources/videos/happy-r-users-purrr-tutorial/)
+* Programming with `dplyr` [vignette](https://cran.r-project.org/web/packages/dplyr/vignettes/programming.html)
+* Selva Prabhakaran's [`ggplot2` tutorial](http://r-statistics.co/Complete-Ggplot2-Tutorial-Part1-With-R-Code.html)
+* `caret` package [documentation](https://topepo.github.io/caret/)
+* [CRAN Machine Learning Task View](https://cran.r-project.org/web/views/MachineLearning.html)
+
+About these slides.... they were created with Yihui's [`xaringan`](https://github.com/yihui/xaringan) and the stylings are a slightly modified version of Patrick Schratz's  [Metropolis theme](https://github.com/pat-s/xaringan-metropolis).
+
+
+---
+
+# The Modeling _Process_
+
+Common steps during model building are:
+
+* estimating model parameters (i.e. training models)
+
+* determining the values of _tuning parameters_ that cannot be directly calculated from the data
+
+* model selection (within a model type) and model comparison (between types)
+
+* calculating the performance of the final model that will generalize to new data
+
+Many books and courses portray predictive modeling as a short sprint. A better analogy would be a marathon or campaign (depending on how hard the problem is). 
+
+
+---
+
+# What the Modeling Process Usually Looks Like
+
+```{r mod-process, echo = FALSE, out.width = '95%', fig.width=8, fig.height=2.5, fig.align='center', dev = 'svg', dev.args = list(bg = "transparent"), warning=FALSE}
+widths <- c(8, 4, 10, 2, 6, 6, 
+            rep(1, 19), 2,
+            rep(1, 19), 2,
+            rep(1, 19), 2,
+            rep(1, 19), 2,
+            4, 8, 15,
+            rep(1, 29), 6,
+            rep(1, 29), 4,
+            1)
+srt <- c(1, cumsum(widths))
+stp <- srt[-1]
+srt <- srt[-length(srt)]
+
+diag_cols <- c(EDA = "#377EB8", "Quantitative Analysis" = "#A6CEE3", 
+               "Feature Engineering" = "#4DAF4A", "Model Fit" = "#E41A1C", 
+               "Model Tuning" = "grey")
+
+bar_loc <- data.frame(srt = srt,
+                  stp = stp,
+                  g = c("EDA", "Quantitative Analysis", "EDA", "Quantitative Analysis", "EDA", "Feature Engineering", 
+                        rep(c("Model Fit", "Model Tuning"), 40),
+                        "Quantitative Analysis", "EDA", "Feature Engineering",
+                        rep(c("Model Fit", "Model Tuning"), 14), "Model Fit", "Feature Engineering",
+                        rep(c("Model Fit", "Model Tuning"), 14), "Model Fit", "Quantitative Analysis",
+                        "Model Fit"))
+bar_loc$ytop <- 1.9
+bar_loc$ybot <- 1
+bar_loc$g <- factor(as.character(bar_loc$g), 
+                levels = c("EDA", "Quantitative Analysis", "Feature Engineering",
+                           "Model Fit", "Model Tuning"))
+text_loc <- data.frame(x = c(1, 8, 30, 36, 120, 124, 132, 147, 211, 215)+1,
+                       y = 2.1)
+text_loc$label <- letters[1:nrow(text_loc)]
+
+mod_loc <- data.frame(x = c(45, 66, 87, 107, 162, 195)+1,
+                      y = .75, 
+                      label = c("Model\n#1", "Model\n#2", "Model\n#3", "Model\n#4",
+                                "Model\n#2", "Model\n#4"))
+
+ggplot(bar_loc) + 
+  geom_rect(aes(fill = g, xmin = srt, xmax = stp,
+                ymin = ybot, ymax = ytop), alpha = .7)  + 
+  theme(
+    legend.position = "bottom",
+    legend.background = element_blank(),
+    axis.line = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title.x = element_text(hjust = .05),
+    axis.title.y = element_blank(),
+    panel.background = element_blank(),
+    panel.border = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    plot.background = element_blank()
+    ) +
+  scale_fill_manual(values = diag_cols, name = "") +
+  geom_text(data = text_loc, aes(x = x, y = y, label = label)) + 
+  geom_text(data = mod_loc, aes(x = x, y = y, label = label), size = 3) +   
+  xlab("Time") + 
+  ylim(c(.5, 2.25))
+```
+
+---
+layout: false
+class: inverse, middle, center
+
+#  Data Usage
+
+---
+
+# Data Splitting and Spending
+
+How do we "spend" the data to find an optimal model? 
+
+We _typically_ split data into training and test data sets:
+
+*  ***Training Set***: these data are used to estimate model parameters and to pick the values of the complexity parameter(s) for the model.
+
+*  ***Test Set***: these data can be used to get an independent assessment of model efficacy. They should not be used during model training. 
+
+
+---
+
+# Data Splitting and Spending 
+
+The more data we spend, the better estimates we'll get (provided the data is accurate).  
+
+Given a fixed amount of data:
+
+* too much spent in training won't allow us to get a good assessment of predictive performance.  We may find a model that fits the training data very well, but is not generalizable (overfitting)
+
+* too much spent in testing won't allow us to get a good assessment of model parameters
+
+Statistically, the best course of action would be to use all the data for model building and use statistical methods to get good estimates of error.
+
+From a non-statistical perspective, many consumers of complex models emphasize the need for an untouched set of samples to evaluate performance.
+
+
+---
+
+# Mechanics of Data Splitting
+
+There are a few different ways to do the split: simple random sampling, _stratified sampling based on the outcome_, by date, or methods that focus on the distribution of the predictors.
+
+For stratification:
+
+* **classification**: this would mean sampling within the classes to preserve the distribution of the outcome in the training and test sets
+
+* **regression**: determine the quartiles of the data set and sample within those artificial groups
+
+
+---
+
+# Ames Housing Data <img src="images/rsample.png" class="title-hex">
+
+Let's load the example data set and split it. We'll put 75% into training and 25% into testing. 
+
+```{r ames-split, message = FALSE}
+# resample loaded with tidyverse or tidymodels package
+ames <- 
+  make_ames() %>% 
+  # Remove quality-related predictors
+  dplyr::select(-matches("Qu"))
+nrow(ames)
+
+# resample functions
+# Make sure that you get the same random numbers
+set.seed(4595)
+data_split <- initial_split(ames, strata = "Sale_Price")
+
+ames_train <- training(data_split)
+ames_test  <- testing(data_split)
+
+nrow(ames_train)/nrow(ames)
+```
+???
+
+The select statement removes subjective quality scores which, to me, seems
+like it should be an outcome and not a predictor. 
+
+---
+
+# Ames Housing Data <img src="images/rsample.png" class="title-hex">
+
+What do these objects look like?
+
+```{r}
+# result of initial_split()
+# <training / testing / total>
+data_split
+```
+
+```{r, eval=FALSE}
+training(data_split)
+```
+
+```{r}
+## # A tibble: 2,199 x 81
+##    MS_SubClass MS_Zoning Lot_Frontage Lot_Area Street Alley Lot_Shape Land_Contour Utilities Lot_Config Land_Slope
+##    <fct>       <fct>            <dbl>    <int> <fct>  <fct> <fct>     <fct>        <fct>     <fct>      <fct>     
+##  1 One_Story_… Resident…          141    31770 Pave   No_A… Slightly… Lvl          AllPub    Corner     Gtl       
+##  2 Two_Story_… Resident…           74    13830 Pave   No_A… Slightly… Lvl          AllPub    Inside     Gtl       
+##  3 Two_Story_… Resident…           78     9978 Pave   No_A… Slightly… Lvl          AllPub    Inside     Gtl       
+##  4 One_Story_… Resident…           43     5005 Pave   No_A… Slightly… HLS          AllPub    Inside     Gtl       
+##  5 One_Story_… Resident…           39     5389 Pave   No_A… Slightly… Lvl          AllPub    Inside     Gtl       
+## # … and many more rows and columns
+## # …
+```
+
+
+---
+layout: false
+class: inverse, middle, center
+
+#  Creating Models in R
+
+
+---
+
+# Specifying Models in R Using Formulas
+
+To fit a model to the housing data, the model terms must be specified. Historically, there are two main interfaces for doing this. 
+
+The **formula** interface using R [formula rules](https://cran.r-project.org/doc/manuals/r-release/R-intro.html#Formulae-for-statistical-models) to specify a _symbolic_ representation of the terms:
+
+Variables + interactions
+
+```{r formula-1, eval = FALSE}
+model_fn(Sale_Price ~ Neighborhood + Year_Sold + Neighborhood:Year_Sold, data = ames_train)
+```
+
+Shorthand for all predictors
+
+```{r formula-2, eval = FALSE}
+model_fn(Sale_Price ~ ., data = ames_train)
+```
+
+Inline functions / transformations
+
+```{r formula-3, eval = FALSE}
+model_fn(log10(Sale_Price) ~ ns(Longitude, df = 3) + ns(Latitude, df = 3), data = ames_train)
+```
+
+This is very convenient but it has some disadvantages.  
+
+---
+
+# Downsides to Formulas
+
+* You can't nest in-line functions such as `model_fn(y ~ pca(scale(x1), scale(x2), scale(x3)), data = dat)`.
+
+* All the model matrix calculations happen at once and can't be recycled when used in a model function. 
+
+* For very _wide_ data sets, the formula method can be [extremely inefficient](https://rviews.rstudio.com/2017/03/01/the-r-formula-method-the-bad-parts/). 
+
+* There are limited _roles_ that variables can take which has led to several re-implementations of formulas. 
+
+* Specifying multivariate outcomes is clunky and inelegant.
+
+* Not all modeling functions have a formula method (consistency!). 
+
+---
+
+# Specifying Models Without Formulas
+
+Some modeling function have a non-formula (XY) interface. This usually has arguments for the predictors and the outcome(s):
+
+```{r non-formula, eval = FALSE}
+# Usually, the variables must all be numeric
+pre_vars <- c("Year_Sold", "Longitude", "Latitude")
+model_fn(x = ames_train[, pre_vars],
+         y = ames_train$Sale_Price)
+```
+
+This is inconvenient if you have transformations, factor variables, interactions, or any other operations to apply to the data prior to modeling. 
+
+Overall, it is difficult to predict if a package has one or both of these interfaces. For example, `lm` only has formulas. 
+
+There is a **third interface**, using _recipes_ that will be discussed later that solves some of these issues. 
+
+---
+
+# A Linear Regression Model <img src="images/broom.png" class="title-hex">
+
+Let's start by fitting an ordinary linear regression model to the training set. You can choose the model terms for your model, but I will use a very simple model:
+
+```{r lm-1}
+simple_lm <- lm(log10(Sale_Price) ~ Longitude + Latitude, data = ames_train)
+```
+
+Before looking at coefficients, we should do some model checking to see if there is anything obviously wrong with the model. 
+
+To get the statistics on the individual data points, we will use the awesome `broom` package:
+
+```{r lm-broom, warning= FALSE, message= FALSE}
+simple_lm_values <- augment(simple_lm)
+names(simple_lm_values)
+``` 
+
+
+---
+
+# Hands-On: Some Basic Diagnostics 
+
+From these results, let's take 10 minutes and do some visualizations: 
+
+* Plot the observed versus fitted values
+
+* Plot the residuals
+
+* Plot the predicted versus residuals
+
+Are there any _downsides_ to this approach? 
+
+---
+
+# parsnip <img src="images/parsnip.png" class="title-hex">
+
+- A tidy unified _interface_ to models
+
+- `lm()` isn't the only way to perform linear regression
+  
+  - `glmnet` for regularized regression
+  
+  - `stan` for Bayesian regression
+  
+  - `keras` for regression using tensorflow
+  
+- But...remember the consistency slide?
+
+  - Each interface has its own minutae to remember
+  
+  - `parsnip` standardizes all that!
+  
+---
+
+# parsnip in Action <img src="images/parsnip.png" class="title-hex">
+
+.pull-left[
+
+1) Create specification
+
+2) Set the engine
+
+3) Fit the model
+
+```{r}
+spec_lin_reg <- linear_reg()
+spec_lin_reg
+
+spec_lm <- set_engine(spec_lin_reg, "lm")
+spec_lm
+```
+
+]
+
+.pull-right[
+
+```{r}
+fit_lm <- fit(
+  spec_lm,
+  log10(Sale_Price) ~ Longitude + Latitude,
+  data = ames_train
+)
+
+fit_lm
+```
+
+]
+
+---
+
+# Different interfaces <img src="images/parsnip.png" class="title-hex">
+
+`parsnip` is not picky about the interface used to specify terms. Remember, `lm()` only allowed the formula interface!
+
+```{r}
+ames_train_log <- ames_train %>%
+  mutate(Sale_Price_Log = log10(Sale_Price))
+
+fit_xy(
+  spec_lm,
+  y = ames_train_log$Sale_Price_Log,
+  x = ames_train_log %>% select(Latitude, Longitude)
+)
+```
+
+---
+
+# Alternative Engines <img src="images/parsnip.png" class="title-hex">
+
+With `parsnip`, it is easy to switch to a different engine, like Stan, to run the
+same model with alternative backends.
+
+.pull-left[
+
+```{r, results = "hide", cache=TRUE}
+spec_stan <- 
+  spec_lin_reg %>%
+  # Engine specific arguments are passed through here
+  set_engine("stan", chains = 4, iter = 1000)
+
+# Otherwise, looks exactly the same!
+fit_stan <- fit(
+  spec_stan,
+  log10(Sale_Price) ~ Longitude + Latitude,
+  data = ames_train
+)
+```
+
+]
+
+.pull-right[
+
+```{r}
+coef(fit_stan$fit)
+
+coef(fit_lm$fit)
+```
+
+]
+
+
+---
+
+# Different models <img src="images/parsnip.png" class="title-hex">
+
+Switching _between_ models is easy since the interfaces are homogenous. 
+
+For example, to fit a 5-nearest neighbor model:
+
+
+```{r}
+fit_knn <- 
+  nearest_neighbor(mode = "regression", neighbors = 5) %>%
+  set_engine("kknn") %>% 
+  fit(log10(Sale_Price) ~ Longitude + Latitude, data = ames_train)
+fit_knn
+```
+
+---
+
+# DANGER
+
+In a real scenario, we would use _resampling_ methods (e.g. cross- \validation, bootstrapping, etc) or a validation set to evaluate how well the model is doing. 
+
+`tidymodels` has a great infrastructure to do this with the `rsample` package. 
+
+In this 90 min tutorial, there's not enough time to go through those methods. 
+
+In general, we would **not** want to predict the test set at this point. I'll do so to illustrate how the code to make predictions works.  
+
+
+---
+
+# Predictions <img src="images/yardstick.png" class="title-hex"><img src="images/purrr.png" class="title-hex"><img src="images/parsnip.png" class="title-hex"><img src="images/dplyr.png" class="title-hex">
+
+Now, let's compute predictions and performance measures:
+
+.pull-left[
+
+```{r purrr-lm-results, warning=FALSE}
+# Numeric predictions always in a df
+# with column `.pred`
+test_pred <- fit_lm %>%
+  predict(ames_test) %>%
+  bind_cols(ames_test) %>%
+  mutate(log_price = log10(Sale_Price))
+
+test_pred %>% 
+  dplyr::select(log_price, .pred) %>% 
+  slice(1:3)
+```
+]
+
+.pull-right[
+
+```{r yarstick}
+# yardstick loaded my tidymodels
+
+# yardstick has many metrics for assessing performance. 
+# They can be bundled together
+perf_metrics <- metric_set(rmse, rsq, ccc)
+
+# A tidy result back:
+test_pred  %>% 
+  perf_metrics(truth = log_price, estimate = .pred)
+```
+
+For the KNN model, just change to `fit_knn`.
+]
+
+
+---
+layout: false
+class: inverse, middle, center
+
+#  Feature Engineering
+
+---
+# Preprocessing and Feature Engineering
+
+This part mostly concerns what we can _do_ to our variables to make the models more effective. 
+
+This is mostly related to the predictors. Operations that we might use are:
+
+* transformations of individual predictors or groups of variables
+
+* alternate encodings of a variable
+
+* elimination of predictors (unsupervised)
+
+In statistics, this is generally called _preprocessing_ the data. As usual, the computer science side of modeling has a much flashier name: _feature engineering_. 
+
+
+---
+
+# Reasons for Modifying the Data
+
+* Some models (_K_-NN, SVMs, PLS, neural networks) require that the predictor variables have the same units. **Centering** and **scaling** the predictors can be used for this purpose. 
+
+* Other models are very sensitive to correlations between the predictors and **filters** or **PCA signal extraction** can improve the model. 
+
+* As we'll see in an example, changing the scale of the predictors using a **transformation** can lead to a big improvement. 
+
+* In other cases, the data can be **encoded** in a way that maximizes its effect on the model. Representing the date as the day of the week can be very effective for modeling public transportation data. 
+
+* Many models cannot cope with missing data so **imputation** strategies might be necessary.  
+
+* Development of new _features_ that represent something important to the outcome (e.g. compute distances to public transportation, university buildings, public schools, etc.) 
+
+---
+layout: false
+class: inverse, middle, center
+
+# Preprocessing Categorical Predictors
+
+
+---
+
+# Dummy Variables
+
+```{r ames, include = FALSE}
+alleys <- data.frame(Alley = levels(ames_train$Alley))
+alley_dummies <- model.matrix(~ Alley, data = alleys)[, -1]
+alley_dummies <- as.data.frame(alley_dummies)
+rownames(alley_dummies) <- levels(ames_train$Alley)
+colnames(alley_dummies) <- gsub("^Alley", "", colnames(alley_dummies))
+```
+
+One common procedure for modeling is to create numeric representations of categorical data. This is usually done via _dummy variables_: a set of binary 0/1 variables for different levels of an R factor. 
+
+For example, the Ames housing data contains a predictor called `Alley` with levels: `r paste0("'", levels(ames_train$Alley), "'", collapse = ", ")`. 
+
+Most dummy variable procedures would make _two_ numeric variables from this predictor that are 1 when the observation has that level, and 0 otherwise.
+
+```{r alley, results = 'asis', echo = FALSE}
+library(kableExtra)
+kable(alley_dummies, format = "html") %>%
+  add_header_above(c("Data" = 1, "Dummy Variables" = 2)) %>%
+  kable_styling(full_width = FALSE)
+```
+
+
+---
+
+# Dummy Variables
+
+If there are _C_ levels of the factor, only _C_-1 dummy variables are created since the last can be inferred from the others. There are different contrast schemes for creating the new variables. 
+
+For ordered factors, _polynomial_ contrasts are used. See this [blog post](http://appliedpredictivemodeling.com/blog/2013/10/23/the-basics-of-encoding-categorical-data-for-predictive-models) for more details. 
+
+How do you create them in R? 
+
+The formula method does this for you<sup>1</sup>. Otherwise, the traditional method is to use `model.matrix()` to create a matrix. However, there are some caveats to this that can make things difficult. 
+
+We'll show another method for making them shortly. 
+
+.footnote[[1] _Almost always_ at least. Tree- and rule-based model functions do not. Examples are `randomforest::randomForest`, `ranger::ranger`, `rpart::rpart`, `C50::C5.0`, `Cubist::cubist`,  `klaR::NaiveBayes` and others.]
+
+???
+Caveats include new (unseen) levels of a predictor value.
+
+
+---
+
+# Infrequent Levels in Categorical Factors
+
+.pull-left[
+One issue is: what happens when there are very few values of a level? 
+
+Consider the Ames training set and the `Neighborhood` variable.
+
+If these data are resampled, what would happen to Landmark and similar locations when dummy variables are created?
+]
+.pull-right[
+```{r ames-hood, echo = FALSE, fig.width=5, fig.height=5,  out.width = '100%', fig.align='center', dev = 'svg', dev.args = list(bg = "transparent")}
+ggplot(ames_train, aes(x = Neighborhood)) + geom_bar() + coord_flip() + xlab("")
+```
+]
+
+???
+Bring up the idea that these issues are model-dependent and something like trees wouldn't care. 
+
+Mention the alley variable and how almost all properties have no alley access. 
+
+Talk about near-zero-variance predictors. 
+
+---
+
+# Infrequent Levels in Categorical Factors
+
+A _zero-variance_ predictor that has only a single value (zero) would be the result. 
+
+Many models (e.g. linear/logistic regression, etc.) would find this numerically problematic and issue a warning and `NA` values for that coefficient. Trees and similar models would not notice. 
+
+There are two main approaches to dealing with this: 
+
+ * Run a filter on the training set predictors prior to running the model and remove the zero-variance predictors.
+ 
+ * Recode the factor so that infrequently occurring predictors (and possibly new values) are pooled into an "other" category. 
+ 
+However, `model.matrix()` and the formula method are incapable of doing either of these. 
+
+
+---
+
+# Recipes <img src="images/recipes.png" class="title-hex">
+
+Recipes are an alternative method for creating the data frame of predictors for a model. 
+
+They allow for a sequence of _steps_ that define how data should be handled. 
+
+Recall the previous part where we used the formula `log10(Sale_Price) ~ Longitude + Latitude`? These steps are:
+
+* Assign `Sale_Price` to be the outcome
+* Assign `Longitude` and `Latitude` as predictors
+* Log transform the outcome
+
+To start using a recipe, these steps can be done using 
+
+```{r rec-start}
+# recipes loaded by tidymodels
+mod_rec <- recipe(Sale_Price ~ Longitude + Latitude, data = ames_train) %>%
+  step_log(Sale_Price, base = 10)
+```
+
+This creates the recipe for data processing (but does not execute it yet)
+
+
+---
+
+# Recipes and Categorical Predictors <img src="images/recipes.png" class="title-hex">
+
+To deal with the dummy variable issue, we can expand the recipe with more steps:
+
+.pull-left[
+
+```{r rec-hood}
+mod_rec <- recipe(
+    Sale_Price ~ Longitude + Latitude + Neighborhood, 
+    data = ames_train
+  ) %>%
+  step_log(Sale_Price, base = 10) %>%
+  
+  # Lump factor levels that occur in 
+  # <= 5% of data as "other"
+  step_other(Neighborhood, threshold = 0.05) %>%
+  
+  # Create dummy variables for _any_ factor variables
+  step_dummy(all_nominal())
+```
+
+]
+
+.pull-right[
+
+```{r rec-hood-print}
+mod_rec
+```
+
+]
+
+Note that we can use standard `dplyr` selectors as well as some new ones based on the data type (`all_nominal()`) or by their role in the analysis (`all_predictors()`).
+
+---
+
+# Using Recipes <img src="images/recipes.png" class="title-hex">
+
+<br>
+
+<br>
+
+.font200[
+```
+         recipe  -->  prepare   --> bake/juice
+
+        (define) --> (estimate) -->  (apply)
+```
+]
+
+
+---
+
+# Preparing the Recipe <img src="images/recipes.png" class="title-hex">
+
+Now that we have a preprocessing _specification_, let's run it on the training set to _prepare_ the recipe:
+
+```{r rec-hood-prep}
+mod_rec_trained <- prep(mod_rec, training = ames_train, verbose = TRUE)
+```
+
+Here, the "training" is to determine which levels to lump together and to enumerate the factor levels of the `Neighborhood` variable.
+
+An unused option, `retain = TRUE`, that keeps the processed version of the training set around so we don't have to recompute it. 
+
+
+---
+
+# Preparing the Recipe
+
+```{r rec-hood-prep-print}
+mod_rec_trained
+```
+
+
+---
+
+# Getting the Values <img src="images/recipes.png" class="title-hex">
+
+Once the recipe is prepared, it can be applied to any data set using `bake()`: 
+
+```{r rec-hood-bake}
+ames_test_dummies <- bake(mod_rec_trained, new_data = ames_test)
+names(ames_test_dummies)
+```
+
+If `retain = TRUE`, the training set does not need to be "rebaked". The `juice()` function can return the processed version of the training data.
+
+Selectors can be used with `bake()` to only extract relevant columns and the default is `everything()`. 
+
+---
+
+# How Data Are Used <img src="images/recipes.png" class="title-hex">
+
+Note that we have:
+
+```{r rec-data-args, eval = FALSE}
+recipe(..., data = data_set)
+prep(...,   training = data_set)
+bake(...,   new_data = data_set)
+```
+
+In the first case, `data` is used by the `recipe` function only to determine the column names and types (e.g. factor, numeric, etc). A small subset can be passed via `head` or `slice`. 
+
+For `prep`, the `training` argument should have all of the data used to estimate parameters and other quantities. 
+
+For `bake`, `new_data` is the data that the pre-processing should be applied to. 
+
+---
+
+# Hands-On: Zero-Variance Filter
+
+Instead of using `step_other()`, take 10 minutes and research how to eliminate any zero-variance predictors using the [`recipe` reference site](https://tidymodels.github.io/recipes/reference/index.html).
+
+Re-run the recipe with this step. 
+
+What were the results? 
+
+Do you prefer either of these approaches to the other? 
+
+
+---
+layout: false
+class: inverse, middle, center
+
+#  Interaction Effects
+
+
+---
+
+# Interactions <img src="images/ggplot2.png" class="title-hex">
+
+An **interaction** between two predictors indicates that the relationship between the predictors and the outcome cannot be describe using only one of the variables. 
+
+For example, let's look at the relationship between the price of a house and the year in which it was built. The relationship appears to be slightly nonlinear, possibly quadratic:
+
+.pull-left[
+```{r year-built-code, eval = FALSE}
+price_breaks <- (1:6)*(10^5)
+
+ggplot(
+    ames_train, 
+    aes(x = Year_Built, y = Sale_Price)
+  ) + 
+  geom_point(alpha = 0.4) +
+  scale_x_log10() + 
+  scale_y_continuous(
+    breaks = price_breaks, 
+    trans = "log10"
+  ) +
+  geom_smooth(method = "loess")
+```
+]
+
+.pull-right[
+```{r year-built-plot, echo = FALSE, fig.width=6, fig.height=4.25,  out.width = '90%', fig.align='center', dev = 'svg', dev.args = list(bg = "transparent"), message = FALSE, warning = FALSE}
+price_breaks <- (1:6)*(10^5)
+
+ggplot(
+    ames_train, 
+    aes(x = Year_Built, y = Sale_Price)
+  ) + 
+  geom_point(alpha = 0.4) +
+  scale_x_log10() + 
+  scale_y_continuous(
+    breaks = price_breaks, 
+    trans = "log10"
+  ) +
+  geom_smooth(method = "loess")
+```
+]
+
+
+---
+
+# Interactions <img src="images/ggplot2.png" class="title-hex">
+
+However... what if we seperate this trend based on whether the property has air conditioning (`r round(mean(ames_train$Central_Air == "Y")*100, 1)`% of the training set) or not (`r round(mean(ames_train$Central_Air == "N")*100, 1)`%):
+
+.pull-left[
+```{r year-built-ac-code, eval = FALSE}
+library(MASS) # to get robust linear regression model
+
+ggplot(
+    ames_train, 
+    aes(x = Year_Built, 
+        y = Sale_Price)
+  ) + 
+  geom_point(alpha = 0.4) +
+  scale_y_continuous(
+    breaks = price_breaks, 
+    trans = "log10"
+  ) + 
+  facet_wrap(~ Central_Air, nrow = 2) +
+  geom_smooth(method = "rlm") 
+```
+]
+
+.pull-right[
+```{r year-built-ac-plot, echo = FALSE, fig.width=6, fig.height=4.5,  out.width = '100%', fig.align='center', dev = 'svg', dev.args = list(bg = "transparent"), message = FALSE, warning = FALSE}
+library(MASS) # to get robust linear regression model
+
+ggplot(
+    ames_train, 
+    aes(x = Year_Built, 
+        y = Sale_Price)
+  ) + 
+  geom_point(alpha = 0.4) +
+  scale_y_continuous(
+    breaks = price_breaks, 
+    trans = "log10"
+  ) + 
+  facet_wrap(~ Central_Air, nrow = 2) +
+  geom_smooth(method = "rlm") 
+```
+]
+
+
+---
+
+# Interactions
+
+It appears as though the relationship between the year built and the sale price is somewhat _different_ for the two groups. 
+
+* When there is no AC, the trend is perhaps flat or slightly decreasing.
+* With AC, there is a linear increasing trend or is perhaps slightly quadratic with some outliers at the low end. 
+
+```{r int-sig}
+mod1 <- lm(log10(Sale_Price) ~ Year_Built + Central_Air, data = ames_train)
+mod2 <- lm(log10(Sale_Price) ~ Year_Built + Central_Air + Year_Built:Central_Air, data = ames_train)
+anova(mod1, mod2)
+```
+
+
+---
+
+# Interactions in Recipes <img src="images/recipes.png" class="title-hex">
+
+We first create the dummy variables for the qualitative predictor (`Central_Air`) then use a formula to create the interaction using the `:` operator in an additional step:
+
+```{r int-rec}
+recipe(Sale_Price ~ Year_Built + Central_Air, data = ames_train) %>%
+  step_log(Sale_Price) %>%
+  step_dummy(Central_Air) %>%
+  step_interact(~ starts_with("Central_Air"):Year_Built) %>%
+  prep(training = ames_train) %>%
+  juice() %>%
+  # select a few rows with different values
+  slice(153:157)
+```
+
+
+---
+
+# Linear Models Again <img src="images/recipes.png" class="title-hex">
+
+.font80[
+Let's add a few extra predictors and  some preprocessing. 
+
+* Two numeric predictors are very skewed and could use a transformation (`Lot_Area` and `Gr_Liv_Area`).
+
+* We'll add neighborhood in as well and a few other house features. 
+
+* The _K_-NN model suggests that the coordinates can be helpful but probably require a nonlinear representation. We can add these using _B-splines_ with 5 degrees of freedom. To evaluate this, we will create two versions of the recipe to evaluate this hypothesis. 
+]
+
+```{r ames-recipes}
+ames_rec <- 
+  recipe(Sale_Price ~ Bldg_Type + Neighborhood + Year_Built + 
+           Gr_Liv_Area + Full_Bath + Year_Sold + Lot_Area +
+           Central_Air + Longitude + Latitude,
+         data = ames_train) %>%
+  step_log(Sale_Price, base = 10) %>%
+  step_BoxCox(Lot_Area, Gr_Liv_Area) %>%
+  step_other(Neighborhood, threshold = 0.05)  %>%
+  step_dummy(all_nominal()) %>%
+  step_interact(~ starts_with("Central_Air"):Year_Built) %>%
+  step_bs(Longitude, Latitude, options = list(df = 5))
+```
+
+```{r more-digits, include = FALSE}
+options(digits = 5)
+```
+
+---
+
+# Longitude <img src="images/ggplot2.png" class="title-hex">
+
+.pull-left[
+```{r longitude-code, eval = FALSE}
+ggplot(ames_train, 
+       aes(x = Longitude, y = Sale_Price)) + 
+  geom_point(alpha = .5) + 
+  geom_smooth(
+    method = "lm", 
+    formula = y ~ splines::bs(x, 5), 
+    se = FALSE
+  ) + 
+  scale_y_log10()
+```
+
+Splines add nonlinear versions of the predictor to a linear model to create smooth and flexible relationships between the predictor and outcome.
+
+This "basis expansion" technique will be seen again in the regression section of the workshop. 
+
+
+]
+.pull-right[
+```{r longitude, echo = FALSE, fig.width=6, fig.height=4.25,  out.width = '100%', fig.align='center', dev = 'svg', dev.args = list(bg = "transparent")}
+ggplot(ames_train, 
+       aes(x = Longitude, y = Sale_Price)) + 
+  geom_point(alpha = .5) + 
+  geom_smooth(
+    method = "lm", 
+    formula = y ~ splines::bs(x, 5), 
+    se = FALSE
+  ) + 
+  scale_y_log10()
+```
+]
+
+
+---
+
+# Latitude <img src="images/ggplot2.png" class="title-hex">
+
+.pull-left[
+```{r latitude-code, eval = FALSE}
+ggplot(ames_train, 
+       aes(x = Latitude, y = Sale_Price)) + 
+  geom_point(alpha = .5) + 
+  geom_smooth(
+    method = "lm", 
+    formula = y ~ splines::bs(x, 5), 
+    se = FALSE
+  ) + 
+  scale_y_log10()
+```
+]
+
+.pull-right[
+```{r latitude, echo = FALSE, fig.width=6, fig.height=4.25,  out.width = '100%', fig.align='center', dev = 'svg', dev.args = list(bg = "transparent")}
+ggplot(ames_train, 
+       aes(x = Latitude, y = Sale_Price)) + 
+  geom_point(alpha = .5) + 
+  geom_smooth(
+    method = "lm", 
+    formula = y ~ splines::bs(x, 5), 
+    se = FALSE
+  ) + 
+  scale_y_log10()
+```
+]
+
+```{r less-digits, include = FALSE}
+options(digits = 3)
+```
+
+---
+
+# A More Complex Linear Model
+```{r opt, include = FALSE}
+options(width = 120)
+```
+
+
+```{r better-lm, warning = FALSE}
+ames_rec <- prep(ames_rec)
+
+train_data <- juice(ames_rec)            # Since we want the training set back so use `juice()`
+test_data  <- bake(ames_rec, ames_test)  # For other data sets
+
+lm_fit <- 
+  linear_reg() %>% 
+  set_engine("lm") %>% 
+  fit(Sale_Price ~ ., data = train_data)
+
+broom::glance(lm_fit$fit)
+```
+
+---
+
+# Test Set Results
+
+.pull-left[
+```{r better-lm-pred, fig.show = "hide"}
+test_data <- 
+  test_data %>% 
+  bind_cols(predict(lm_fit, test_data))
+
+test_data %>% 
+  perf_metrics(truth = Sale_Price, estimate = .pred)
+
+ggplot(test_data, aes(x = 10^Sale_Price, y = 10^.pred)) + 
+  geom_point(alpha = .4) +
+  geom_abline(lty = 2) +
+  scale_x_log10()  + scale_y_log10() +
+  coord_equal()
+```
+]
+.pull-right[
+
+```{r obs-pred, echo = FALSE,  out.width = '100%', fig.align='center', dev = 'svg', dev.args = list(bg = "transparent")}
+ggplot(test_data, aes(x = 10^Sale_Price, y = 10^.pred)) + 
+  geom_point(alpha = .4) +
+  geom_abline(lty = 2) +
+  scale_x_log10()  + scale_y_log10() +
+  coord_equal()
+```
+]
+
+
+---
+
+# Next Steps
+
+.font90[
+
+* **Resampling** ([`rsample`](https://tidymodels.github.io/rsample/)) methods can be used to estimate model performance before going to the test set. 
+
+* To compare performance between-models, **Bayesian analysis** ([`tidyposterior`](https://tidymodels.github.io/tidyposterior/)) can be used. 
+
+* For predictors with many (or novel) **categories**, supervised encodings ([`embed`](https://tidymodels.github.io/embed/)) may make the model simpler. 
+
+* When working with **tuning parameters**, pre-defined objects can make this easier ([`dials`](https://tidymodels.github.io/dials/))
+
+* When you don't want to make a prediction, **equivocal zone** data structures are available ([`probably`](https://tidymodels.github.io/probably/)).
+
+* If you are making your own modeling package, [`hardhat`](https://tidymodels.github.io/hardhat/) makes the **behind-the-scene code** simple. 
+
+* Feature engineering for **text data** is easy ([`tidytext`](https://github.com/juliasilge/tidytext) and [`textrecipes`](https://tidymodels.github.io/textrecipes/))
+
+* A beutiful API for hypothesis testing ([`infer`](https://infer.netlify.com/))
+
+]
+
