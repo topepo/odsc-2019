@@ -5,8 +5,10 @@ Notes and code for a 2019 ODSC East 90min workshop.
 If you want to run the analyses _locally_, please install:
 
 ```r
-install.packages(c("tidyverse", "tidymodel", "AmesHousing"),
-                 repos = "http://cran.r-project.org")
+install.packages(
+  c('tidymodels', 'tidyverse', 'AmesHousing', 'kknn', 'MASS'),
+  repos = "http://cran.rstudio.com"
+)
 
 # optionally, you could also install: 
 install.packages("rstanarm", repos = "http://cran.r-project.org")
