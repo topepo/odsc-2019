@@ -198,7 +198,7 @@ test_pred %>%
   dplyr::select(log_price, .pred) %>% 
   slice(1:3)
 
-# yardstick loaded my tidymodels
+# yardstick loaded by tidymodels
 
 # yardstick has many metrics for assessing performance. 
 # They can be bundled together

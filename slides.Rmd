@@ -547,7 +547,7 @@ For stratification:
 Let's load the example data set and split it. We'll put 75% into training and 25% into testing. 
 
 ```{r ames-split, message = FALSE}
-# resample loaded with tidyverse or tidymodels package
+# rsample loaded with tidyverse or tidymodels package
 ames <- 
   make_ames() %>% 
   # Remove quality-related predictors
@@ -867,7 +867,7 @@ test_pred %>%
 .pull-right[
 
 ```{r yarstick}
-# yardstick loaded my tidymodels
+# yardstick loaded by tidymodels
 
 # yardstick has many metrics for assessing performance. 
 # They can be bundled together
